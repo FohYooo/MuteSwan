@@ -1,0 +1,10 @@
+{
+  "name": "mute-swan",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "MUTE SWAN, a top-down horror game played with your voice",
+  "scripts": {
+    "test": "node --test tests/"
+  }
+}

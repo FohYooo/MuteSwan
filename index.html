@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MUTE SWAN</title>
+<link rel="icon" href="data:,">
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  body { display: flex; align-items: center; justify-content: center; }
+  #stage { position: relative; }
+  canvas#screen { image-rendering: pixelated; image-rendering: crisp-edges; background: #0b0a0c; display: block; }
+  canvas#ui { position: absolute; left: 0; top: 0; pointer-events: none; }
+  body.nocursor { cursor: none; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="screen" width="320" height="180"></canvas>
+  <canvas id="ui"></canvas>
+</div>
+<script type="module" src="src/main.js"></script>
+</body>
+</html>

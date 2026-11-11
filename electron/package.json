@@ -1,0 +1,9 @@
+{
+  "name": "mute-swan",
+  "productName": "MUTE SWAN",
+  "version": "1.0.0",
+  "description": "MUTE SWAN, a horror game played with your voice",
+  "main": "main.js",
+  "author": "Foh",
+  "license": "UNLICENSED"
+}

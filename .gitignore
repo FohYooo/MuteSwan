@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.DS_Store
+vendor/model/*.tar.gz
+.superpowers/
+build/
+docs/superpowers/

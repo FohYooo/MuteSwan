@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Voice lab</title>
+<style>body{background:#0b0a0c;color:#e8e1d3;font:14px monospace;padding:16px} button{font:inherit;padding:6px 12px}</style>
+</head>
+<body>
+<h1>Voice lab</h1>
+<p>Feeds generated speech through the game's voice pipeline (detectors + offline recognizer).</p>
+<button id="go">Run</button>
+<pre id="out"></pre>
+<script type="module">
+import { Voice, MODEL_URL } from '../src/voice/mic.js';
+import { createShoutDetector } from '../src/voice/detectors.js';
+
+const out = document.getElementById('out');
+const log = (s) => { out.textContent += s + '\n'; };
+window.labResults = null;
+
+async function decode(name) {
+  const buf = await (await fetch(`audio/${name}.wav`)).arrayBuffer();
+  return Voice.context.decodeAudioData(buf);
+}
+
+async function run() {
+  Voice.ensureContext();
+  await Voice.resume();
+  const t0 = performance.now();
+  const status = await Voice.loadWords(MODEL_URL);
+  const loadMs = Math.round(performance.now() - t0);
+  log(`model: ${status} in ${loadMs} ms`);
+  const results = { loadMs, status };
+  for (const name of ['run3', 'no', 'other']) {
+    const buffer = await decode(name);
+    const frames = [];
+    const words = [];
+    const offF = Voice.onFrame((f) => frames.push(f));
+    const offW = Voice.onWord((w) => words.push(w.word));
+    await Voice.feedBuffer(buffer);
+    await new Promise((r) => setTimeout(r, 1200));
+    offF(); offW();
+    const peak = Math.max(...frames.map((f) => f.db));
+    const det = createShoutDetector({ shoutDb: peak - 12, maxMs: 1500 });
+    const shouts = frames.map((f) => det.push(f)).filter(Boolean).length;
+    const voicedPct = Math.round((100 * frames.filter((f) => f.voiced && f.db > peak - 20).length) / Math.max(1, frames.filter((f) => f.db > peak - 20).length));
+    const r = { shouts, runWords: words.filter((w) => w === 'run').length, noWords: words.filter((w) => w === 'no').length, peak: Math.round(peak), voicedPct };
+    results[name] = r;
+    log(`${name}: ${JSON.stringify(r)}`);
+  }
+  window.labResults = results;
+}
+document.getElementById('go').onclick = () => run().catch((e) => log('ERROR ' + e.message));
+</script>
+</body>
+</html>
