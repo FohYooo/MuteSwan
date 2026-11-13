@@ -168,6 +168,7 @@ export function createRunner({ store = Store() } = {}) {
     if (!cp) { finish(); return; }
     state = cp;
     if ((state.windowLooks || 0) >= 2) state.windowLooks = 1;
+    world.resetRuns(); // whatever was still running belongs to the night that just ended
     world.actors = [];
     world.player.hidden = false;
     world.player.walk = null;

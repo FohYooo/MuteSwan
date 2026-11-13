@@ -56,6 +56,7 @@ export function createWorld({ getFlag = () => false } = {}) {
       this.room = new Room(def, getFlag);
       const s = typeof spawn === 'object' && spawn ? spawn : def.spawns[spawn] || Object.values(def.spawns)[0];
       this.player.place(s.x, s.y, s.dir || 'down');
+      for (const a of this.actors) if (!a.persist) a.walk?.resolve(); // nobody waits on a walk in a room we left
       this.actors = this.actors.filter((a) => a.persist);
       this.banner = { text: def.name, t0: performance.now() };
       this.snapCamera();
@@ -75,12 +76,16 @@ export function createWorld({ getFlag = () => false } = {}) {
       return a;
     },
     actor(id) { return this.actors.find((a) => a.id === id) || null; },
-    removeActor(id) { this.actors = this.actors.filter((a) => a.id !== id); },
+    removeActor(id) {
+      for (const a of this.actors) if (a.id === id) a.walk?.resolve();
+      this.actors = this.actors.filter((a) => a.id !== id);
+    },
 
     // Straight-line scripted walk (x first, then y). speed in px/frame at 60 fps.
     walkTo(who, tx, ty, speed = 1.0) {
       const a = who === 'player' ? this.player : this.actor(who);
       if (!a) return Promise.resolve();
+      a.walk?.resolve(); // a superseded walk still finishes for whoever awaited it
       const gx = tx * TS + 8, gy = ty * TS + 14;
       return new Promise((resolve) => { a.walk = { gx, gy, speed, resolve }; });
     },
@@ -95,12 +100,16 @@ export function createWorld({ getFlag = () => false } = {}) {
       else { a.x = w.gx; a.y = w.gy; a.step(dt, false); a.walk = null; w.resolve(); }
     },
 
+    // Every caller waiting on a fade is resolved: a second request never strands the first.
     fadeTo(v, speed = 3) {
-      if (this.fade === v) { this.fadeTarget = v; return Promise.resolve(); }
+      if (v !== this.fadeTarget) this.flushFade(); // the old target will never be reached
       this.fadeTarget = v;
       this.fadeSpeed = speed;
-      return new Promise((resolve) => { this.fadeDone = resolve; });
+      if (this.fade === v) return Promise.resolve();
+      return new Promise((resolve) => { this.fadeWaiters.push(resolve); });
     },
+    flushFade() { const list = this.fadeWaiters; this.fadeWaiters = []; list.forEach((f) => f()); },
+    fadeWaiters: [],
 
     snapCamera() {
       const r = this.room;
@@ -111,9 +120,21 @@ export function createWorld({ getFlag = () => false } = {}) {
     },
 
     // Run an async story hook while blocking player control.
+    // While any event runs the player waits. Runs belong to a generation: resetRuns() (a restart
+    // from a checkpoint) releases the lock even if an abandoned event never finishes.
+    gen: 0,
     async run(fn) {
+      const gen = this.gen;
       this.busy++;
-      try { await fn(); } finally { this.busy = Math.max(0, this.busy - 1); }
+      try { await fn(); } finally { if (gen === this.gen) this.busy = Math.max(0, this.busy - 1); }
+    },
+    resetRuns() {
+      this.gen++;
+      this.busy = 0;
+      this.transitioning = false;
+      this.fadeWaiters = []; // their events were abandoned; nobody resumes them
+      this.player.walk = null;
+      for (const a of this.actors) a.walk = null;
     },
 
     // during a chase the story event is still awaiting it, so the player keeps control
@@ -125,7 +146,7 @@ export function createWorld({ getFlag = () => false } = {}) {
       if (this.fade !== this.fadeTarget) {
         const d = this.fadeSpeed * dt;
         this.fade = this.fade < this.fadeTarget ? Math.min(this.fadeTarget, this.fade + d) : Math.max(this.fadeTarget, this.fade - d);
-        if (this.fade === this.fadeTarget && this.fadeDone) { const f = this.fadeDone; this.fadeDone = null; f(); }
+        if (this.fade === this.fadeTarget) this.flushFade();
       }
       if (!this.room) return;
       for (const a of this.actors) this.stepWalk(a, dt);
@@ -154,20 +175,32 @@ export function createWorld({ getFlag = () => false } = {}) {
       this.snapCamera();
     },
 
+    // One door at a time: pushing into a door and pressing the action key on the same frame
+    // used to start two transitions, and the first one never finished (a soft lock).
     tryDoor(door) {
+      if (this.transitioning) return;
+      this.transitioning = true;
+      const gen = this.gen;
       this.run(async () => {
-        const go = this.hooks.door ? await this.hooks.door(door) : !this.room.doorLocked(door);
-        if (!go) {
-          // step back off the threshold so the door does not retrigger
-          const [dx, dy] = DIR_V[this.player.dir];
-          this.player.x -= dx * 4; this.player.y -= dy * 4;
-          return;
+        try {
+          const go = this.hooks.door ? await this.hooks.door(door) : !this.room.doorLocked(door);
+          if (gen !== this.gen) return;
+          if (!go) {
+            // step back off the threshold so the door does not retrigger
+            const [dx, dy] = DIR_V[this.player.dir];
+            this.player.x -= dx * 4; this.player.y -= dy * 4;
+            return;
+          }
+          Audio.sfx('door');
+          await this.fadeTo(1, 5);
+          if (gen !== this.gen) return;
+          this.enter(door.to, door.spawn);
+        } finally {
+          if (gen === this.gen) this.transitioning = false;
         }
-        Audio.sfx('door');
-        await this.fadeTo(1, 5);
-        this.enter(door.to, door.spawn);
       });
     },
+    transitioning: false,
 
     interact() {
       const p = this.player;
